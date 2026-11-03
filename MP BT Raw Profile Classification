@@ -1,0 +1,129 @@
+
+
+clear variables; clc; 
+%%
+% Load the data from the Excel file
+filename = 'Microplastics 20 profiles.xlsx'; % Replace with your file name
+MP_Table = readtable(filename, 'VariableNamingRule', 'preserve');
+%%
+% Extract the 2nd to 21st columns
+MP_CData = MP_Table{:, 2:21}; % Extracts columns 2 to 21 as a matrix
+
+% Transpose the columns into rows
+MP_Data = MP_CData';
+%%
+MP_Obs= size(MP_Data, 1);
+MP_L= {'MP'};
+MP_L= categorical(MP_L);
+MP_Lbl= repelem(MP_L, MP_Obs)';
+%%
+% Load the data from the Excel file
+filename = 'BT 30 PROFILES NEW.xlsx'; % Replace with your file name
+BT_Table = readtable(filename, 'VariableNamingRule', 'preserve');
+%%
+% Extract the 2nd to 21st columns
+BT_CData = BT_Table{:, 9:28}; % Extracts columns 2 to 21 as a matrix
+
+% Transpose the columns into rows
+BT_Data = BT_CData';
+%%
+BT_Obs= size(BT_Data, 1);
+BT_L= {'BT'};
+BT_L= categorical(BT_L);
+BT_Lbl= repelem(BT_L, BT_Obs)';
+%%
+matrix= vertcat(MP_Data, BT_Data);
+Labels= vertcat(MP_Lbl, BT_Lbl);
+%%
+cv = cvpartition(Labels,'HoldOut',0.95);
+idx = cv.test;
+%%
+dataTrain = matrix(~idx,:);
+dataTest  = matrix(idx,:);
+labelTrain = Labels(~idx,:);
+labelTest  = Labels(idx,:);
+%%
+[m,~]= size(dataTrain);
+[o, ~ ]= size(dataTest);
+%%
+sample_Sig= matrix(1, :);
+sf = waveletScattering('SignalLength', numel(sample_Sig), ...
+                       'SamplingFrequency', 256, ...
+                       'QualityFactors', [4 1], ...
+                       'InvarianceScale', 0.5); 
+feat= featureMatrix(sf, sample_Sig,'Transform','log');
+%%
+scat_features_train= cell(m, 1);
+scat_features_test= cell(o, 1);
+%%
+for itr= 1:m   %% Training
+    tmp = featureMatrix(sf, dataTrain(itr, :), 'Transform','log');
+%     out = reshape(tmp, [], 1 );
+    scat_features_train{itr, 1} = tmp;
+end 
+%, 'Transform','log'
+%,'Normalization','parent'
+%%
+[inputSize,~] = size(scat_features_train{1});
+YTrain= categorical(labelTrain);
+%%
+filterSize = 2;
+numFilters = 32;
+numClasses = 2;
+
+layers = [ ...
+    sequenceInputLayer(inputSize)
+    convolution1dLayer(filterSize,numFilters,Padding="causal")
+    reluLayer
+    layerNormalizationLayer
+    convolution1dLayer(filterSize,2*numFilters,Padding="causal")
+    reluLayer
+    layerNormalizationLayer
+    globalAveragePooling1dLayer
+    fullyConnectedLayer(numClasses)
+    softmaxLayer
+    classificationLayer];
+%%
+options = trainingOptions("adam", ...
+    "InitialLearnRate",0.0001, ...
+    MaxEpochs=300, ...
+    SequencePaddingDirection="left", ...
+    Plots="training-progress", ...
+    Verbose=0);
+%%
+net = trainNetwork(scat_features_train,YTrain,layers,options);
+%%
+for ttr= 1:o    %% Testing
+    tmp = featureMatrix(sf, dataTest(ttr, :), 'Transform','log');
+%     out = reshape(tmp, [], 1 );
+    scat_features_test{ttr, 1} = tmp;
+end 
+%%
+% Evaluation 
+YTest= categorical(labelTest);
+Ypred= classify(net, scat_features_test,'SequenceLength','shortest' );
+accuracy= round((sum(YTest==Ypred)./numel(YTest))*100);
+[confmat, order]= confusionmat(Ypred, YTest);
+figure
+heatmap(order, order, confmat);
+title(['Micro Plastics and Black Turmeric ',', Accuracy ',num2str(accuracy),' %'])
+xlabel('Predicted Class');
+ylabel('True Class')
+%%
+
+figure;
+imagesc(confmat);
+colorbar;
+axis equal tight; axis off;
+title(['Confusion Matrix ',', Accuracy ',num2str(accuracy),' %'])
+
+
+
+
+
+
+
+
+
+
+
